@@ -33,8 +33,6 @@ static inline void shack_init(CPUState *env)
 			slot->tpc_ptr = NULL;
 		}
 	}
-//	env->shadow_ret_count = 0;
-//	env->shadow_ret_addr = (uint64_t *)malloc(SHACK_SIZE * sizeof(uint64_t));
 }
 
 /*
@@ -114,12 +112,6 @@ void push_shack(CPUState *env, TCGv_ptr cpu_env, target_ulong next_eip)
 	tcg_gen_addi_ptr(tmp_shack_top, tmp_shack_top, sizeof(uint64_t));
 	tcg_gen_st_ptr(tmp_shack_top, cpu_env, offsetof(CPUState, shack_top));
 	tcg_temp_free_ptr(tmp_shack_top);
-//	puts("push_shack");
-//	printf("shack_top = %x\n", env->shack_top);
-//	printf("count = %lld\n", ((uint64_t)env->shack_top - (uint64_t)env->shack)/sizeof(uint64_t));
-//	printf("spc @ %x\n", next_eip);
-//	printf("tmp_spc @ %x\n", cur->guest_eip);
-//	if (isfound) printf("------ tmp_tpc @ %x\n", cur->tpc_ptr);
 }
 
 /*
@@ -128,60 +120,43 @@ void push_shack(CPUState *env, TCGv_ptr cpu_env, target_ulong next_eip)
  */
 void pop_shack(TCGv_ptr cpu_env, TCGv next_eip)
 {
-	// Keep next_eip
-	TCGv tmp_next_eip = tcg_temp_local_new();
-	tcg_gen_mov_tl(tmp_next_eip, next_eip);
-
-	int label_exit = gen_new_label();
-	// Load shadow_pair_ptr <=> tmp_shack_top
+	/* Load shadow_pair_ptr <=> tmp_shack_top */
 	TCGv_ptr tmp_shack_top = tcg_temp_local_new_ptr();
 	tcg_gen_ld_ptr(tmp_shack_top, cpu_env, offsetof(CPUState, shack_top));
-	// Load shack
+	/* Load shack */
 	TCGv_ptr tmp_shack = tcg_temp_local_new_ptr();
 	tcg_gen_ld_ptr(tmp_shack, cpu_env, offsetof(CPUState, shack));
-	//
+	/* Make sure shack_top > shack */
+	int label_exit = gen_new_label();
 	tcg_gen_brcond_ptr(TCG_COND_EQ, tmp_shack_top, tmp_shack, label_exit);
+	/* if shack_top > shack */
+		/* Load slot from shack_top - 1. */
+		tcg_gen_addi_ptr(tmp_shack_top, tmp_shack_top, -sizeof(uint64_t));
+		TCGv_ptr tmp_slot = tcg_temp_local_new();
+		tcg_gen_ld_ptr(tmp_slot, tmp_shack_top, 0);
+		/* Load guest_eip <=> tmp_spc */
+		TCGv tmp_spc = tcg_temp_local_new();
+		tcg_gen_ld_tl(tmp_spc, tmp_slot, offsetof(shadow_pair, guest_eip));
 
-	// shack_top - 1.
-	tcg_gen_addi_ptr(tmp_shack_top, tmp_shack_top, -sizeof(uint64_t));
-	// Load slot
-	TCGv_ptr tmp_slot = tcg_temp_local_new();
-	tcg_gen_ld_ptr(tmp_slot, tmp_shack_top, 0);
-	// Load guest_eip <=> tmp_spc
-	TCGv tmp_spc = tcg_temp_local_new();
-	tcg_gen_ld_tl(tmp_spc, tmp_slot, offsetof(shadow_pair, guest_eip));
+//		tcg_gen_brcond_tl(TCG_COND_NE, tmp_spc, next_eip, label_exit);
+		/* if next_eip == tmp_spc */
+			/* Load tpc_ptr <=> tmp_tpc */
+			TCGv_ptr tmp_tpc = tcg_temp_local_new_ptr();
+			tcg_gen_ld_ptr(tmp_tpc, tmp_slot, offsetof(shadow_pair, tpc_ptr));
+			/* shack_top = shack_top - 1 */
+			tcg_gen_st_ptr(tmp_shack_top, cpu_env, offsetof(CPUState, shack_top));
 
-//	tcg_gen_brcond_tl(TCG_COND_NE, tmp_spc, tmp_next_eip, label_not_eq);
-	// if next_eip == tmp_spc
-		// Load tpc_ptr <=> tmp_tpc
-		TCGv_ptr tmp_tpc = tcg_temp_local_new_ptr();
-		tcg_gen_ld_ptr(tmp_tpc, tmp_slot, offsetof(shadow_pair, tpc_ptr));
-
-		TCGv_ptr tmp_NULL = tcg_temp_local_new_ptr();
-		tcg_gen_mov_tl(tmp_NULL, tcg_const_ptr(0));
-
-		tcg_gen_st_ptr(tmp_shack_top, cpu_env, offsetof(CPUState, shack_top));
-		tcg_temp_free_ptr(tmp_shack_top);
-		tcg_temp_free(tmp_spc);
-		tcg_temp_free(tmp_next_eip);
-
-		int label_NULL = gen_new_label();
-		tcg_gen_brcond_ptr(TCG_COND_EQ, tmp_tpc, tmp_NULL, label_NULL);
-		// if tpc != NULL
-			*gen_opc_ptr++ = INDEX_op_jmp;
-			*gen_opparam_ptr++ = tmp_tpc;		
-	// else
+			tcg_gen_brcond_ptr(TCG_COND_EQ, tmp_tpc, tcg_const_ptr(0), label_exit);
+			/* if tpc != NULL */
+				*gen_opc_ptr++ = INDEX_op_jmp;
+				*gen_opparam_ptr++ = tmp_tpc;		
+	/* exit */
 	gen_set_label(label_exit);
-
 		tcg_temp_free_ptr(tmp_shack_top);
+		tcg_temp_free_ptr(tmp_shack);
+		tcg_temp_free_ptr(tmp_slot);
 		tcg_temp_free(tmp_spc);
-		tcg_temp_free(tmp_next_eip);
-
-	gen_set_label(label_NULL);
-
 		tcg_temp_free_ptr(tmp_tpc);
-		tcg_temp_free_ptr(tmp_NULL);
-
 }
 
 /*
