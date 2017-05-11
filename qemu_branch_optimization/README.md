@@ -12,3 +12,7 @@
         (ptr)->element1
         (*ptr).element1
         ```
+* Benchmark - Coremark_v1.0 compile
+	* *make PORT_DIR=linux clean*
+	* *make PORT_DIR=linux PORT_CFLAGS="-O2 -m32"*
+
