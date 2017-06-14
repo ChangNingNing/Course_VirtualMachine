@@ -1,0 +1,3 @@
+[submodule "linux-kvm-arm-instrumentation/linux-kvm-arm"]
+	path = linux-kvm-arm-instrumentation/linux-kvm-arm
+	url = https://github.com/virtualopensystems/linux-kvm-arm
